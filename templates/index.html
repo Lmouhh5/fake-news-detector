@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Fake News Detection</title>
+    <!-- Bootstrap CSS for responsive and modern UI components -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        /* Custom styling for prediction results */
+        .prediction-real { color: #10b962; }  /* Green color for REAL predictions */
+        .prediction-fake { color: #ef4444; }  /* Red color for FAKE predictions */
+        .loading { display: none; }           /* Hidden by default */
+        .error-message { display: none; }     /* Hidden by default */
+    </style>
+</head>
+<body class="bg-light">
+    <div class="container py-5">
+        <h1 class="text-center mb-4">Fake News Detection</h1>
+        
+        <!-- Error Message Container -->
+        <!-- Displays any errors that occur during analysis -->
+        <div id="error-message" class="error-message alert alert-danger" role="alert"></div>
+
+        <!-- Loading Spinner -->
+        <!-- Shown while the article is being analyzed -->
+        <div id="loading" class="loading text-center py-4">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+            <p class="mt-2">Analyzing article...</p>
+        </div>
+
+        <!-- Input Form Section -->
+        <!-- Where users can paste their news article text -->
+        <div class="row justify-content-center">
+            <div class="col-md-8">
+                <form id="prediction-form" class="card shadow-sm">
+                    <div class="card-body">
+                        <div class="mb-3">
+                            <label for="news-text" class="form-label">Enter News Article</label>
+                            <textarea 
+                                class="form-control" 
+                                id="news-text" 
+                                rows="6" 
+                                placeholder="Paste the news article text here..."
+                                required></textarea>
+                        </div>
+                        <div class="text-center">
+                            <button 
+                                id="analyze-btn"
+                                class="btn btn-primary" 
+                                type="submit">
+                                Analyze Article
+                            </button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- Results Display Section -->
+        <!-- Hidden by default, shown after analysis -->
+        <div id="results" class="mt-4" style="display: none;">
+            <!-- Ensemble Prediction Results -->
+            <!-- Shows the combined prediction from all models -->
+            <div class="row justify-content-center">
+                <div class="col-md-8">
+                    <div class="card shadow-sm mb-4">
+                        <div class="card-body">
+                            <h3 class="card-title text-center mb-4">Overall Prediction</h3>
+                            <div id="ensemble-result" class="text-center mb-4">
+                                <span id="ensemble-prediction" class="h2"></span>
+                                <p id="ensemble-confidence" class="text-muted mt-2"></p>
+                            </div>
+                            <!-- Real/Fake Score Display -->
+                            <div class="row">
+                                <div class="col-6">
+                                    <div class="card bg-light">
+                                        <div class="card-body">
+                                            <p class="card-text text-muted">Real Score</p>
+                                            <p id="real-score" class="h4 mb-0"></p>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-6">
+                                    <div class="card bg-light">
+                                        <div class="card-body">
+                                            <p class="card-text text-muted">Fake Score</p>
+                                            <p id="fake-score" class="h4 mb-0"></p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Individual Model Results -->
+            <!-- Shows predictions from each model separately -->
+            <div class="row justify-content-center">
+                <div class="col-md-8">
+                    <div class="card shadow-sm">
+                        <div class="card-body">
+                            <h3 class="card-title mb-4">Individual Model Predictions</h3>
+                            <div id="model-results"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bootstrap JS Bundle -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.0/dist/js/bootstrap.bundle.min.js"></script>
+    
+    <!-- Application JavaScript -->
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // Get references to DOM elements
+            const form = document.getElementById('prediction-form');
+            const analyzeBtn = document.getElementById('analyze-btn');
+            const loadingDiv = document.getElementById('loading');
+            const errorDiv = document.getElementById('error-message');
+            const resultsDiv = document.getElementById('results');
+            const newsTextArea = document.getElementById('news-text');
+
+            /**
+             * Display error message and hide other components
+             * @param {string} message - Error message to display
+             */
+            function showError(message) {
+                errorDiv.textContent = message;
+                errorDiv.style.display = 'block';
+                loadingDiv.style.display = 'none';
+                resultsDiv.style.display = 'none';
+            }
+
+            /**
+             * Show loading spinner and disable submit button
+             */
+            function showLoading() {
+                errorDiv.style.display = 'none';
+                loadingDiv.style.display = 'block';
+                resultsDiv.style.display = 'none';
+                analyzeBtn.disabled = true;
+            }
+
+            /**
+             * Transform raw predictions into a more manageable format
+             * @param {Array} predictions - Array of model predictions
+             * @returns {Object} Transformed predictions organized by model
+             */
+            function transformPredictions(predictions) {
+                const modelPredictions = {};
+                predictions.forEach(result => {
+                    if (result && result.model) {
+                        modelPredictions[result.model.toLowerCase()] = {
+                            prediction: result.prediction,
+                            confidence: result.confidence,
+                            accuracy: result.accuracy,
+                            description: result.description
+                        };
+                    }
+                });
+                return modelPredictions;
+            }
+
+            /**
+             * Display analysis results in the UI
+             * @param {Object} data - Response data from the server
+             */
+            function showResults(data) {
+                console.log('Raw response data:', data);
+
+                // Validate response structure
+                if (!data || typeof data !== 'object') {
+                    throw new Error('Invalid response: data is not an object');
+                }
+
+                if (!Array.isArray(data.predictions)) {
+                    throw new Error('Invalid response: predictions is not an array');
+                }
+
+                if (!data.ensemble || typeof data.ensemble !== 'object') {
+                    throw new Error('Invalid response: ensemble data is missing or invalid');
+                }
+
+                // Transform predictions for easier handling
+                const modelPredictions = transformPredictions(data.predictions);
+                console.log('Transformed predictions:', modelPredictions);
+
+                // Update ensemble results display
+                const ensemble = data.ensemble;
+                const ensemblePrediction = document.getElementById('ensemble-prediction');
+                
+                const prediction = String(ensemble.prediction || '').toUpperCase();
+                ensemblePrediction.textContent = prediction;
+                ensemblePrediction.className = `h2 ${prediction === 'REAL' ? 'prediction-real' : 'prediction-fake'}`;
+
+                // Update confidence and score displays
+                const confidence = Number(ensemble.confidence || 0);
+                const realScore = Number(ensemble.real_score || 0);
+                const fakeScore = Number(ensemble.fake_score || 0);
+
+                document.getElementById('ensemble-confidence').textContent = 
+                    `Confidence: ${Math.round(confidence * 100)}%`;
+                document.getElementById('real-score').textContent = 
+                    `${Math.round(realScore * 100)}%`;
+                document.getElementById('fake-score').textContent = 
+                    `${Math.round(fakeScore * 100)}%`;
+
+                // Generate and display individual model results
+                const modelResultsDiv = document.getElementById('model-results');
+                modelResultsDiv.innerHTML = Object.entries(modelPredictions)
+                    .map(([modelName, modelData]) => {
+                        const prediction = String(modelData.prediction || '').toUpperCase();
+                        const confidence = Number(modelData.confidence || 0);
+                        const accuracy = Number(modelData.accuracy || 0);
+                        const description = String(modelData.description || '');
+
+                        return `
+                            <div class="card mb-3 ${prediction === 'REAL' ? 'border-success' : 'border-danger'}">
+                                <div class="card-body">
+                                    <div class="d-flex justify-content-between align-items-center mb-2">
+                                        <h5 class="card-title mb-0">${modelName.toUpperCase()}</h5>
+                                        <span class="text-muted">Accuracy: ${Math.round(accuracy * 100)}%</span>
+                                    </div>
+                                    <p class="card-text text-muted mb-2">${description}</p>
+                                    <div class="d-flex justify-content-between align-items-center">
+                                        <span class="${prediction === 'REAL' ? 'prediction-real' : 'prediction-fake'} fw-bold">
+                                            ${prediction}
+                                        </span>
+                                        <span class="text-muted">
+                                            Confidence: ${Math.round(confidence * 100)}%
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+                    })
+                    .join('');
+
+                // Show results and re-enable submit button
+                loadingDiv.style.display = 'none';
+                resultsDiv.style.display = 'block';
+                analyzeBtn.disabled = false;
+            }
+
+            // Handle form submission
+            form.addEventListener('submit', async function(e) {
+                e.preventDefault();
+                const text = newsTextArea.value.trim();
+
+                // Validate input
+                if (!text) {
+                    showError('Please enter some text to analyze');
+                    return;
+                }
+
+                showLoading();
+
+                try {
+                    // Send request to server
+                    const response = await fetch('/predict', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ text })
+                    });
+
+                    if (!response.ok) {
+                        throw new Error(`Server error: ${response.status}`);
+                    }
+
+                    const data = await response.json();
+                    console.log('Raw response data:', data);
+
+                    if (data.error) {
+                        throw new Error(data.error);
+                    }
+
+                    // Display results
+                    showResults(data);
+                } catch (error) {
+                    console.error('Error:', error);
+                    showError(error.message || 'An error occurred while analyzing the text');
+                }
+            });
+        });
+    </script>
+</body>
+</html> 
