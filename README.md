@@ -2,6 +2,14 @@
 
 A web application that uses machine learning to detect fake news articles. The application analyzes articles using a combination of TF-IDF features and linguistic features to make predictions.
 
+## Demo
+
+
+
+https://github.com/user-attachments/assets/0f98434f-850e-4dcf-ab44-05a3827efa81
+
+
+
 ## Features
 
 - Real-time article analysis
